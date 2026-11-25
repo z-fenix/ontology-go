@@ -2,7 +2,7 @@ GO ?= go
 COMPOSE ?= docker compose -f docker-compose.dev.yaml
 TEST_DSN ?= postgres://onto:onto@localhost:5432/ontology?sslmode=disable
 
-.PHONY: tidy fmt vet test test-integration build validate-example ddl-example lint dev-up dev-down dev-reset run-oms run-action publish-example run-action-fga fga-init fga-sync-once run-indexer run-query run-mcp
+.PHONY: tidy fmt vet test test-integration build validate-example ddl-example lint dev-up dev-down dev-reset run-oms run-action publish-example run-action-fga fga-init fga-sync-once run-indexer run-query run-mcp sdk-example
 
 tidy:
 	$(GO) mod tidy
@@ -91,3 +91,8 @@ run-action-fga: build
 run-mcp: build
 	ONTO_OMS_URL=http://localhost:8080 ONTO_AUTH_DEV_HEADERS=true \
 	ONTO_MCP_CONFIRM_SECRET=$$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') ./bin/mcp-server
+
+# Generate the TypeScript SDK for the example ontology and type-check it (needs Node).
+sdk-example: build
+	./bin/ontoctl sdk generate examples/ontology --out examples/sdk/mro.ts
+	npx --yes -p typescript@5.6 tsc -p examples/sdk/tsconfig.json

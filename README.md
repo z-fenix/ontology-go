@@ -459,3 +459,44 @@ make run-mcp                                      # http://127.0.0.1:8083/mcp
 - 不支持 `subscriptions/listen`，模型发布新版本后客户端靠 `ttlMs`（60 秒）过期重新拉取工具列表。
 - 没有实现 MCP 的 OAuth 授权发现（Protected Resource Metadata）；客户端需要直接配置 bearer token。
 - 写回类动作耗时超过 10 秒时，工具结果是 `WRITEBACK_PENDING`，代理需要之后再查询结果。
+
+## TypeScript SDK 生成
+
+```bash
+./bin/ontoctl sdk generate examples/ontology --out web/src/mro.ts --ontology-version 3 --header "commit $(git rev-parse --short HEAD)"
+make sdk-example      # 生成示例 SDK 并用 tsc --strict 做类型检查（需要 Node）
+```
+
+生成一个**单文件、零依赖**的 TypeScript 模块：运行时只用全局 `fetch`（Node 18+ 和浏览器都有），直接放进前端或 Node 项目即可。
+
+```ts
+import { createClient, OntologyError } from "./mro";
+
+const client = createClient({ queryUrl: "https://onto.example.com", token: () => getAccessToken() });
+
+const page = await client.objects.WorkOrder.search({
+  where: { and: [
+    { eq: { field: "status", value: "OPEN" } },                       // field 只能是 WorkOrder 的属性名
+    { link: { path: "aircraft", where: { eq: { field: "baseAirport", value: "SIN" } } } },
+  ] },
+  orderBy: [{ field: "priority", direction: "desc" }],
+});
+page.data[0]?.properties.status;   // "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELLED" | null
+
+for await (const wo of client.objects.WorkOrder.all({ where: { isNull: { field: "technicianId" } } })) { /* 自动翻页 */ }
+
+await client.actions.assignWorkOrder.apply({ workOrder: "WO-1", technician: "T-1" }, { idempotencyKey: "k1" });
+```
+
+生成内容：
+- 每个对象类型：`XxxProperties`（属性类型）、`XxxLink`（可导航的关系名）、`Xxx`（完整对象类型）。枚举（含值类型里的枚举）生成字面量联合类型；精确小数、日期、时间戳是字符串；数组带元素类型；所有属性都可能为 `null`（无值或被脱敏），敏感属性在注释里标明。向量属性不生成（查询服务不返回）。
+- 每个动作类型：`XxxParams`，必填参数非可选，对象引用是主键字符串；注释里带动作说明和前置条件。
+- `createClient()` 返回 `client.objects.<类型>`（`get` / `find` / `search` / `all` / `aggregate` / `links`）和 `client.actions.<动作>`（`validate` / `apply` / `applyBatch`）。错误统一抛 `OntologyError`，带稳定的 `errorCode`（如 `SUBMISSION_CRITERIA_FAILED`、`STALE_OBJECT`）。
+- 文件头记录 ontology 名、版本、checksum；输出是确定的，可以提交进仓库并在 CI 里比对是否过期。
+
+**CI**：每次构建都会生成示例 SDK，并用 `tsc --strict` 编译 `examples/sdk/usage.ts`。这个示例同时断言错误用法**编译不过**：属性名写错、缺少必填参数、关系名写错（`@ts-expect-error`）。
+
+限制：
+- 只支持 TypeScript；Python/Java SDK 还没做。
+- 筛选条件里 `link.where` 的字段名不做类型检查（关联类型在运行时才确定），由服务端校验。
+- 生成的客户端按模型生成时的类型工作；模型发布新版本后要重新生成，服务端会拒绝不兼容的调用，但不会自动提示 SDK 过期。

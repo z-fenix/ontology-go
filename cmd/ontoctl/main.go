@@ -46,6 +46,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newDiffCmd(stdout, stderr),
 		newPublishCmd(stdout, stderr),
 		newFGACmd(stdout, stderr),
+		newSDKCmd(stdout, stderr),
 		&cobra.Command{
 			Use:   "version",
 			Short: "Print version",

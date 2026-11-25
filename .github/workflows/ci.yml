@@ -63,6 +63,17 @@ jobs:
           ./bin/ontoctl ddl examples/ontology > /dev/null
           ./bin/ontoctl fga check examples/ontology --model deploy/openfga/model.json
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Generate the TypeScript SDK and type-check it together with a usage example (strict mode;
+      # usage.ts also asserts that wrong field, parameter and link names fail to compile).
+      - name: TypeScript SDK
+        run: |
+          ./bin/ontoctl sdk generate examples/ontology --out examples/sdk/mro.ts --header "commit ${GITHUB_SHA}"
+          npx --yes -p typescript@5.6 tsc -p examples/sdk/tsconfig.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
