@@ -8,7 +8,8 @@
 //
 // Requirements: ONTO_TEST_DSN (migrations applied). Temporal comes from ONTO_TEST_TEMPORAL
 // (host:port of a running server, e.g. localhost:7233 from `make dev-up`); otherwise the SDK
-// starts a dev server, downloading the Temporal CLI on first use (or TEMPORAL_CLI_PATH).
+// starts a dev server, downloading the Temporal CLI on first use (or TEMPORAL_CLI_PATH). The
+// download goes to os.TempDir unless TEMPORAL_CLI_DIR names a cacheable directory.
 package e2e
 
 import (
@@ -143,10 +144,20 @@ func temporalClient(t *testing.T) client.Client {
 		t.Cleanup(c.Close)
 		return c
 	}
+	// Left unset, the SDK downloads the CLI into os.TempDir(), which on CI is per-job and so
+	// can never be reused. TEMPORAL_CLI_DIR points the download at a stable, cacheable path;
+	// the SDK does os.CreateTemp in it without creating it first, so it has to exist.
+	destDir := os.Getenv("TEMPORAL_CLI_DIR")
+	if destDir != "" {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
+			t.Fatalf("create Temporal CLI cache dir %s: %v", destDir, err)
+		}
+	}
 	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{
-		ClientOptions: &client.Options{},
-		ExistingPath:  os.Getenv("TEMPORAL_CLI_PATH"),
-		LogLevel:      "warn",
+		ClientOptions:  &client.Options{},
+		ExistingPath:   os.Getenv("TEMPORAL_CLI_PATH"),
+		CachedDownload: testsuite.CachedDownload{DestDir: destDir},
+		LogLevel:       "warn",
 	})
 	if err != nil {
 		t.Fatalf("start Temporal dev server: %v", err)
