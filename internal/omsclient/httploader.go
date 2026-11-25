@@ -15,6 +15,10 @@ type HTTPLoader struct {
 	BaseURL  string // e.g. http://oms:8080
 	Ontology string
 	Client   *http.Client
+	// Token, when set, is sent as "Authorization: Bearer <token>" (a service token from the IdP).
+	Token string
+	// Actor, when set, is sent as X-Actor (only for an OMS running with ONTO_AUTH_DEV_HEADERS).
+	Actor string
 }
 
 // NewHTTPLoader builds an HTTPLoader with a default client.
@@ -27,6 +31,12 @@ func (l *HTTPLoader) fetch(ctx context.Context, query string) (*spec.CompiledOnt
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if l.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+l.Token)
+	}
+	if l.Actor != "" {
+		req.Header.Set("X-Actor", l.Actor)
 	}
 	resp, err := l.Client.Do(req)
 	if err != nil {

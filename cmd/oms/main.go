@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/acme/ontology/internal/auth"
 	"github.com/acme/ontology/internal/oms"
 )
 
@@ -32,9 +33,19 @@ func main() {
 	}
 	defer pool.Close()
 
+	authn, _, err := auth.FromEnv(ctx)
+	if err != nil {
+		slog.Error("authentication setup", "err", err)
+		os.Exit(1)
+	}
+	owners := auth.SplitList(os.Getenv("ONTO_OMS_OWNER_GROUPS"))
+	if len(owners) == 0 {
+		slog.Warn("ONTO_OMS_OWNER_GROUPS is empty: any authenticated caller can publish and activate versions")
+	}
+
 	store := oms.NewStore(pool)
 	svc := oms.NewService(store)
-	h := oms.NewHandler(svc, store)
+	h := oms.NewHandler(svc, store, authn, owners)
 
 	srv := &http.Server{
 		Addr:              addr,

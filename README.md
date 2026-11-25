@@ -31,7 +31,7 @@ examples/ontology/      航空维修示例（4 个对象类型、3 个链接类�
 
 ## 已实现的规则
 
-G000–G007、VT001–VT003、OT001–OT013、OT015、LT001–LT005、AT001–AT010、WH001–WH002。
+G000–G007、VT001–VT003、OT001–OT013、OT015、LT001–LT005、AT001–AT011、WH001–WH002。
 
 规则说明：
 - OT011–OT015 和 LT005 是对 Spec 的补充：非法类型、非法 sensitivity、properties 为空、columnMapping 引用了未知属性、join table 引用了未声明的 connector。
@@ -258,3 +258,204 @@ CI 示例（GitHub Actions）：
 Temporal 工作流测试用 SDK 自带的测试环境，在 unit job 里跑，不需要 Temporal 服务。
 
 首次提交前：本地没有 Go 时可以直接推，CI 会在缺少 `go.sum` 时自动 `go mod tidy`（并给出 warning）；但 gofmt 检查会失败，因为部分源码还没格式化。建议在有 Go 的机器上先执行 `go mod tidy && make fmt`，把 `go.sum` 一起提交。
+
+## 认证（OIDC JWT）与属性脱敏
+
+OMS 和 Action Service 现在都通过 `internal/auth` 认证调用方，只依赖 Go 标准库：
+
+- 通过 `{issuer}/.well-known/openid-configuration` 找到 JWKS。签名密钥会缓存，遇到未知的 `kid` 时自动重新拉取，以支持密钥轮换。
+- 只接受 RS256/384/512 和 ES256/384；`none` 和 HMAC 一律拒绝。校验 `iss`、`aud`、`exp`（必填）和 `nbf`，允许 60 秒时钟偏差。
+- issuer 必须是 https，本机地址除外；开发环境可以设置 `ONTO_OIDC_ALLOW_HTTP=true` 放开。
+- 身份映射：`sub` 是用户；带 RFC 8693 `act.sub` 的委托 token 视为 AI 代理，代表 `sub` 对应的用户执行；`actor_kind=SERVICE` 视为服务账号。用户组从 `groups` claim 读取，可配置。
+
+| 环境变量 | 用于 | 说明 |
+|---|---|---|
+| `ONTO_OIDC_ISSUER` / `ONTO_OIDC_AUDIENCE` | 两个服务 | 生产环境必填；audience 可以用逗号分隔多个 |
+| `ONTO_OIDC_GROUPS_CLAIM` / `ONTO_OIDC_KIND_CLAIM` | 两个服务 | 默认 `groups` / `actor_kind` |
+| `ONTO_AUTH_DEV_HEADERS=true` | 两个服务 | 开发模式：信任 `X-Actor` 等请求头，`make run-oms` / `run-action` 已默认开启 |
+| `ONTO_OMS_OWNER_GROUPS` | OMS | 能发布和激活版本的组；为空时任何已登录用户都能发布（启动时会警告） |
+| `ONTO_OMS_TOKEN` / `ONTO_OMS_ACTOR` | Action Service | 读取 OMS 元数据时用的服务 token，或开发模式下的身份 |
+
+OMS 的所有 `/api/v1` 接口都要求登录，未登录返回 401；发布和激活版本还要求属于 owner 组，否则返回 403。`ontoctl publish` 已经会把 `ONTO_TOKEN` 作为 Bearer token 发送。
+
+**属性脱敏**（`internal/authz/redact.go`）：`ParseClearances("grp-finance=CONFIDENTIAL,...")` 把用户组映射到可读的最高敏感级别，所有已登录用户默认都能读 INTERNAL；`Redact` 把超过该级别的属性置为 null，并返回被隐藏的属性名列表（对外以 `__redacted` 字段返回）。Action Service 的返回结果目前只包含对象引用、不含属性值，所以还没有地方用到脱敏；后续的对象查询接口会接入。
+
+**升级注意：** 在部署时设置 `ONTO_OIDC_*` 或 `ONTO_AUTH_DEV_HEADERS=true` 之前，两个服务都会拒绝启动。这是有意的：不允许在没有认证配置的情况下误上线。
+
+## 数据同步管道（Indexer）
+
+```bash
+make dev-up                 # 迁移 000003 新建 indexer.sync_state
+make run-oms                # 终端 1
+make publish-example        # 发布示例模型（建出 obj.* 表）
+make run-indexer            # 同步一轮，输出 JSON 统计
+./bin/indexer               # 常驻：每 30 秒同步一次
+```
+
+把源系统表里的数据合并进对象表（`obj.*`），每种对象类型按配置的冲突策略合并：
+
+| 策略 | 合并规则 |
+|---|---|
+| `APPLY_USER_EDITS`（默认） | 用户改过的属性一直保留用户的值，源数据只更新其余属性 |
+| `MOST_RECENT_VALUE` | 源数据行比对象最后一次编辑新时，覆盖所有属性（包括用户改过的），这些属性不再算“已编辑”；否则同上 |
+
+两种策略共同的规则：
+- 用户通过 Action 删除的对象不会因为源数据还在而复活；源系统删除的对象软删除，源数据行重新出现时恢复。
+- 只由 Action 创建、源系统里没有的对象，不会被同步删除。
+- 值没有变化时不写库，版本号不变；值变了版本号 +1，正在执行的 Action 会因乐观锁冲突而重读。
+
+同步方式：
+- **增量**：对象类型配了 `timestampColumn` 时，按 (时间戳, 主键) 游标分页读取变化的行。游标和数据在同一个事务里提交，进程中途崩溃也不会丢数据或重复写。
+- **全量快照**：没有时间戳列的类型每轮都做全量；有时间戳列的类型每 `ONTO_INDEXER_FULL_INTERVAL`（默认 1 小时）做一次，用来发现源系统里被硬删除的行。整次快照在一个事务里提交。
+- **防误删保护**：全量快照要删除超过一半的对象（至少 10 个时才检查）会被拒绝，避免源查询出错时清空数据；确认源数据没问题后用 `--force` 执行。
+- **多对多关系**：每轮全量同步关联表。用户通过 Action 建立或解除的关系不会被源数据覆盖。
+- **Debezium**：`ParseDebezium` + `Indexer.ApplyEvent` 已经能处理 Debezium 的 JSON 变更事件（新增、更新、删除、快照读取），走同一套合并逻辑。还缺 Kafka 消费者——为了不改动 `go.sum` 没有引入 Kafka 客户端，需要时在有 Go 环境的机器上加依赖即可接入。
+
+配置：`ONTO_DB_DSN`（对象库）、`ONTO_SOURCE_<CONNECTOR>_DSN`（每个 connector 一个源库，如 `ONTO_SOURCE_MRO_DB_DSN`）、`ONTO_OMS_URL` / `ONTO_OMS_TOKEN`、`ONTO_INDEXER_INTERVAL`（默认 30s）、`ONTO_INDEXER_FULL_INTERVAL`（默认 1h）。
+
+限制：
+- 源库目前只支持 PostgreSQL。
+- `MOST_RECENT_VALUE` 按“对象最后一次编辑时间”比较，不是按单个属性的编辑时间。
+- 派生属性（如向量 embedding）不从源读取，也还没有生成。
+- 同步不检查必填属性：源数据缺必填值时照样写入。
+
+## 对象查询服务（query-service）
+
+```bash
+make run-oms && make publish-example && make run-indexer   # 先有数据
+make run-query                                              # :8082
+curl -s -X POST localhost:8082/api/v1/ontologies/mro/objects/WorkOrder/search \
+  -H 'X-Actor: alice' -d '{
+    "where": {"and": [
+      {"eq": {"field": "status", "value": "OPEN"}},
+      {"link": {"path": "aircraft", "where": {"eq": {"field": "baseAirport", "value": "SIN"}}}}
+    ]},
+    "orderBy": [{"field": "priority", "direction": "desc"}],
+    "pageSize": 20}'
+```
+
+| 接口 | 说明 |
+|---|---|
+| `GET /objects/{type}/{pk}` | 单个对象 |
+| `GET /objects/{type}/{pk}/links/{link}` | 沿关系导航（外键双向、多对多） |
+| `POST /objects/{type}/search` | 过滤 + 排序 + 分页 |
+| `POST /objects/{type}/aggregate` | 分组聚合：`count`、`sum`、`avg`、`min`、`max` |
+
+均位于 `/api/v1/ontologies/{ont}` 之下；`?ontologyVersion=` 可固定版本，响应头 `X-Ontology-Version` 返回实际使用的版本。
+
+**过滤语法**：`and`、`or`、`not`、`eq`（值为 null 时等价于 isNull）、`gt`、`gte`、`lt`、`lte`、`in`、`contains`（字符串不区分大小写；数组判断是否包含某元素）、`startsWith`、`isNull`、`link`（存在至少一个关联对象满足子条件，最多嵌套 3 层）。每个条件只能有一个运算符；字段名和值的类型都会按模型校验，所有值都用参数绑定，不拼接 SQL。
+
+**权限与脱敏：**
+- 配了 `authz` 的对象类型逐个检查 `viewer` 关系；看不到的对象和不存在的对象返回同样的 404。AI 代理需要它自己和它代表的用户都有权限；授权服务不可用时返回 503。
+- 超出调用方级别的属性返回 null，并列在 `__redacted` 里（`ONTO_CLEARANCE_GROUPS=组=级别,...`，所有登录用户默认能看 INTERNAL）。这样验收用例 E16 有了落脚点。
+- 不允许用超出级别的属性做过滤、排序或聚合，返回 403 `FIELD_NOT_PERMITTED`，否则可以通过“哪些对象匹配”推断出被隐藏的值。
+
+**分页**：分页令牌记录扫描位置，并绑定查询条件和 ontology 版本，换了条件或版本后旧令牌返回 400。被权限过滤掉的对象不会让后续页错位；一次请求最多扫描 1 万个候选对象，超过时返回已找到的结果和继续扫描的令牌。
+
+**限制：**
+- 权限过滤是“先查再逐个检查”，受保护的对象类型数据量很大、而调用方能看到的很少时会比较慢；下一步用 OpenFGA 的 ListObjects 或预先计算的可见范围下推到 SQL。
+- 受保护的对象类型做聚合时，最多只统计 1 万个匹配对象，超出返回 422。
+- 只按偏移量分页，翻页过程中数据有增删时可能重复或漏掉个别对象。
+- 还没有全文检索和向量语义检索（要等 OpenSearch）。
+
+## CEL 多跳关系访问（AT011）
+
+Action 的前置条件、规则模板和 webhook 模板现在可以沿单值关系访问关联对象，例如：
+
+```yaml
+submissionCriteria:
+  - expr: 'workOrder.aircraft.status == "ACTIVE"'
+    message: 飞机已停场，不能指派
+rules:
+  - modifyObject: { object: "{{workOrder}}", set: { summary: "{{workOrder.aircraft.model}} 检查" } }
+```
+
+- **编译期**（`spec/paths.go`，新规则 AT011）：检查路径里的每一跳都是存在的关系，只能沿单值关系走（不能走 `aircraft.workOrders` 这种一对多），最多 3 跳；写错会给出拼写建议。
+- **运行时**（`action/links.go`）：只加载表达式真正用到的关联对象，逐跳检查 `viewer` 权限。关联为空、对象不存在、或调用方看不到时，该字段为 null——对它做比较会求值失败，前置条件按“不通过”处理，不会泄露看不到的对象是否存在。
+
+## OpenFGA 权限关系同步（fga-sync）
+
+按对象类型 `authz.tuples` 模板（如 `base:{{baseAirport}}`）从对象数据推导关系元组，并保持 OpenFGA 与之一致：
+
+- `authz.derived_tuple` 记录“由对象数据推导出的元组”，属性改变或对象删除时只删除这些元组，手工授予或其他系统维护的元组不受影响。
+- **增量**：读取 Action Service 写入的 `ObjectEdited` outbox 事件，处理到哪里记录在 `authz.sync_cursor`；失败时游标不前进，下一轮重试。
+- **全量**：定期（默认 10 分钟）或 `fga-sync --once` 全量对账；Indexer 写入的源数据变更没有 outbox 事件，靠全量对账覆盖。
+- 先写 OpenFGA 再更新记录表，写入和删除都按幂等方式提交（`on_duplicate`/`on_missing: ignore`），中途崩溃下一轮会修复；单次请求按 OpenFGA 默认上限 100 条分批。
+
+配置：`ONTO_DB_DSN`、`ONTO_FGA_URL`、`ONTO_FGA_STORE_ID`、`ONTO_FGA_MODEL_ID`、`ONTO_OMS_URL`/`ONTO_OMS_TOKEN`、`ONTO_FGA_SYNC_INTERVAL`（5s）、`ONTO_FGA_FULL_INTERVAL`（10m）。迁移 000004 新建 `authz` schema。
+
+限制：
+- Indexer 带来的变更要等全量对账（最长 10 分钟）才反映到权限上。
+- `on_duplicate`/`on_missing` 需要 OpenFGA 1.8 及以上（docker-compose 里是 1.8.1）。
+- OpenFGA 授权模型（`.fga` 文件）本身还没有放进仓库，需要先手动创建 store 和模型。
+
+## OpenFGA 授权模型与初始化
+
+模型文件放在 `deploy/openfga/`：
+
+| 文件 | 用途 |
+|---|---|
+| `model.json` | 授权模型（OpenFGA API 接受的 JSON 格式），`ontoctl fga init` 上传的就是它 |
+| `model.fga` | 同一模型的 DSL 写法，方便阅读和评审；修改时两份要同步（`fga model transform` 可以把 DSL 转成 JSON） |
+| `dev-tuples.json` | 开发用的示例授权：alice 是 SIN 基地经理，bob 是 SIN 工程师，carol 是 PEK 经理 |
+
+模型结构：`base`（manager ⊇ engineer）→ `aircraft`（经 `base` 关系继承：工程师可查看、经理可停场）→ `work_order`（指派的技师可查看；能看飞机的人能看工单；能停场的人能指派）。
+
+**一致性检查** `ontoctl fga check [dir] --model deploy/openfga/model.json`（不连 OpenFGA，已加进 CI）：
+- 每个对象类型的 `authz.fgaType` 在模型里存在，并且有 `viewer` 关系（查询服务和 Action 引擎都用它判断可见性）。
+- 每条 `authz.tuples` 的关系存在、可以直接写入，并且接受模板里的用户类型（比如 `base:{{baseAirport}}` 要求该关系允许 `base` 类型）。
+- 每个 Action 的 `permission.relation` 在对应类型上存在。
+
+**初始化** `ontoctl fga init [dir] --fga-url ... [--store ontology] [--seed file]`：先做上面的检查；store 不存在就创建；当前最新模型和文件内容不同才上传新模型；可选写入示例授权。重复执行不会产生新 store 或新模型。标准输出是可直接 `eval` 的环境变量：
+
+```bash
+make dev-up            # 已包含 make fga-init，ID 写入 .env.fga
+cat .env.fga           # export ONTO_FGA_STORE_ID=... ONTO_FGA_MODEL_ID=...
+make publish-example && make run-indexer
+make fga-sync-once     # 从对象数据推导 base/aircraft/assignee 关系
+make run-action-fga    # Action Service 走真实 OpenFGA 授权
+```
+
+`ONTO_FGA_TOKEN` 设置后会作为 [REDACTED_TOKEN] 发给 OpenFGA（OpenFGA 开启 preshared key 认证时用）。
+
+限制：
+- `model.fga` 和 `model.json` 不会自动比对是否一致，CI 检查的只是 `model.json`。
+- 模型变更只追加新版本，不删除旧版本；服务用的版本由 `ONTO_FGA_MODEL_ID` 决定，改了模型要更新这个变量再重启服务。
+
+## MCP Server（AI 代理接入）
+
+实现 MCP 协议 **2026-07-28** 版本：无状态 Streamable HTTP，端点 `/mcp` 只接受 POST，没有 initialize 握手和会话，每个请求在 `params._meta` 里带协议版本和客户端能力。
+
+```bash
+make run-oms; make run-query; make run-action   # 后端
+make run-mcp                                      # http://127.0.0.1:8083/mcp
+```
+
+**工具**（`tools/list` 按固定顺序返回，根据当前 ontology 版本自动生成）：
+
+| 工具 | 说明 |
+|---|---|
+| `ontology_describe` | 对象类型、属性（含敏感级别和枚举值）、关系、可用动作；建议代理先调用 |
+| `objects_get` / `objects_links` | 读对象、沿关系导航 |
+| `objects_search` / `objects_aggregate` | 筛选排序分页（单页最多 100 条）、分组统计 |
+| `action_validate` | 只校验动作的参数、权限和前置条件，不写数据 |
+| `action_<apiName>` | 每个 `ai.exposeToAgents: true` 的动作一个工具；参数 schema 由模型生成（类型、枚举、正则、范围），描述里带 `agentHint` 和前置条件说明 |
+
+**权限**：MCP Server 自己不连数据库，所有调用都带着调用方的凭证（`Authorization`，开发模式下是 `X-Actor` 等）转发给 query-service 和 action-service，由它们做认证、对象权限和属性脱敏。所以代理能看到和能做的，和它代表的用户完全一致；AI 代理用 RFC 8693 委托 token 时，两边的权限都会检查。
+
+**人工确认**（`ai.requireHumanConfirmation: true`），按协议的 Multi Round-Trip Request 实现：
+1. 第一次调用先跑 `validate`；校验不通过直接返回错误，不会让用户确认一个注定失败的操作。
+2. 校验通过返回 `resultType: input_required`，内含 `elicitation/create` 表单（动作名称、说明、全部参数），以及签名的 `requestState`。
+3. 客户端把表单展示给用户，带着用户的回答和 `requestState` 重试。`requestState` 用 HMAC 签名，绑定调用者、工具和参数，10 分钟有效；参数被改动、换了调用者或过期都会被拒绝。
+4. 用户确认后才执行，幂等键由这次确认派生，客户端重试同一次确认不会执行两次；用户拒绝则返回 `DECLINED`，不做任何修改。
+5. 客户端没有声明 `elicitation` 能力时，直接返回 `MissingRequiredClientCapability`（-32021）。
+
+**协议校验**：`MCP-Protocol-Version` 头必须存在并与 body 一致；`Mcp-Method`、`Mcp-Name` 头必须与 body 一致（支持 `=?base64?...?=` 编码），否则 400 + HeaderMismatch（-32020）；不支持的版本返回 UnsupportedProtocolVersion（-32022）并列出支持的版本；校验 `Origin` 头防 DNS rebinding（白名单 `ONTO_MCP_ALLOWED_ORIGINS`，不带 Origin 的非浏览器客户端放行）；GET/DELETE 返回 405；默认只监听 127.0.0.1。
+
+配置：`ONTO_SERVER_ADDR`（默认 `127.0.0.1:8083`）、`ONTO_QUERY_URL`、`ONTO_ACTION_URL`、`ONTO_OMS_URL`/`ONTO_OMS_TOKEN`、`ONTO_MCP_ALLOWED_ORIGINS`、`ONTO_MCP_CONFIRM_SECRET`（十六进制，至少 16 字节；未配置时需要确认的动作一律拒绝）、以及与其他服务相同的 `ONTO_OIDC_*` / `ONTO_AUTH_DEV_HEADERS`。
+
+限制：
+- 只支持 2026-07-28 版本，不兼容 2025-11-25 及更早需要 initialize 握手的客户端（这类客户端会收到 400）。
+- 不支持 `subscriptions/listen`，模型发布新版本后客户端靠 `ttlMs`（60 秒）过期重新拉取工具列表。
+- 没有实现 MCP 的 OAuth 授权发现（Protected Resource Metadata）；客户端需要直接配置 bearer token。
+- 写回类动作耗时超过 10 秒时，工具结果是 `WRITEBACK_PENDING`，代理需要之后再查询结果。

@@ -456,3 +456,27 @@ func TestEditValidation(t *testing.T) {
 		t.Fatalf("code = %s", code(t, err))
 	}
 }
+
+func TestCriteriaFollowLinks(t *testing.T) { // CEL multi-hop: workOrder.aircraft.status
+	e, _, objs := fixture(t)
+	ont := e.Ontologies.(fakeOnt).o
+	a := *ont.ActionTypes["assignLocal"]
+	a.APIName = "assignActiveOnly"
+	a.SubmissionCriteria = []spec.Criterion{{Expr: `workOrder.aircraft.status == "ACTIVE"`, Message: "aircraft is not active"}}
+	ont.ActionTypes["assignActiveOnly"] = &a
+	req := assign("WO-1")
+	req.ActionType = "assignActiveOnly"
+	if _, err := e.Apply(context.Background(), req); err != nil {
+		t.Fatalf("active aircraft: %v", err)
+	}
+	objs.objs[objstore.ObjectRef{Type: "Aircraft", PK: "B-1234"}].Props["status"] = "GROUNDED"
+	if cd := code(t, func() error { _, err := e.Apply(context.Background(), req); return err }()); cd != "SUBMISSION_CRITERIA_FAILED" {
+		t.Fatalf("grounded aircraft: code = %s", cd)
+	}
+	// An aircraft the user may not see behaves like no aircraft: the comparison fails.
+	objs.objs[objstore.ObjectRef{Type: "Aircraft", PK: "B-1234"}].Props["status"] = "ACTIVE"
+	e.Authz = fakeAuthz{deny: map[string]bool{"user:alice|viewer|aircraft:B-1234": true}}
+	if cd := code(t, func() error { _, err := e.Apply(context.Background(), req); return err }()); cd != "SUBMISSION_CRITERIA_FAILED" {
+		t.Fatalf("invisible aircraft: code = %s", cd)
+	}
+}

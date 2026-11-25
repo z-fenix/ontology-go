@@ -214,6 +214,9 @@ func (e *Engine) attempt(ctx context.Context, req ApplyRequest, ont *spec.Compil
 
 	// 6. submission criteria
 	vars := celVars(at, rp, objs, req.Actor)
+	if err := e.attachLinks(ctx, ont, at, req.Actor, rp, objs, vars); err != nil {
+		return nil, err
+	}
 	val := Validation{Result: StatusValid, Criteria: make([]CriterionResult, 0, len(criteria))}
 	for i, prg := range criteria {
 		passed, err := prg.EvalBool(vars)

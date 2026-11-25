@@ -1,0 +1,24 @@
+{
+  "tuples": [
+    {
+      "user": "user:alice",
+      "relation": "manager",
+      "object": "base:SIN"
+    },
+    {
+      "user": "user:bob",
+      "relation": "engineer",
+      "object": "base:SIN"
+    },
+    {
+      "user": "user:carol",
+      "relation": "manager",
+      "object": "base:PEK"
+    },
+    {
+      "user": "user:action-service",
+      "relation": "manager",
+      "object": "base:SIN"
+    }
+  ]
+}

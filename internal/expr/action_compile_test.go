@@ -28,6 +28,7 @@ func TestActionCriterionAT003(t *testing.T) {
   properties:
     id: { type: string, required: true }
     status: { type: string }
+    priority: { type: integer }
   datasource: { connector: mro_db, table: public.work_orders }
 `
 	actionType := func(criterion string) string {
@@ -48,6 +49,7 @@ func TestActionCriterionAT003(t *testing.T) {
 		{"syntax error", `'wo.status ='`, true},
 		// objectRef variables are dynamic maps (env.go), so a bare `wo.status` is dyn and
 		// CompileBool accepts it by design. The expression must be statically non-bool.
+		// `priority` has to be a declared property or AT011 rejects the traversal first.
 		{"statically not a bool", `'wo.priority + 1'`, true},
 		{"unknown variable", `'nope.status == "OPEN"'`, true},
 		{"dynamic property is accepted", `'wo.status'`, false},

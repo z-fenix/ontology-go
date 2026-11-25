@@ -24,6 +24,7 @@ import (
 	"github.com/acme/ontology/internal/action"
 	"github.com/acme/ontology/internal/action/functions"
 	"github.com/acme/ontology/internal/action/workflow"
+	"github.com/acme/ontology/internal/auth"
 	"github.com/acme/ontology/internal/authz"
 	"github.com/acme/ontology/internal/objstore"
 	"github.com/acme/ontology/internal/oms"
@@ -56,7 +57,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	cache := omsclient.New(omsclient.NewHTTPLoader(omsURL, ontology), 3)
+	loader := omsclient.NewHTTPLoader(omsURL, ontology)
+	loader.Token = os.Getenv("ONTO_OMS_TOKEN") // service token for reading metadata from OMS
+	loader.Actor = envOr("ONTO_OMS_ACTOR", "action-service")
+	cache := omsclient.New(loader, 3)
 	go oms.ListenVersions(ctx, func(c context.Context) (*pgx.Conn, error) { return pgx.Connect(c, dsn) }, ontology, cache)
 
 	store := objstore.New(pool)
@@ -92,6 +96,11 @@ func main() {
 
 	if runAPI {
 		az := mustAuthorizer()
+		authn, _, err := auth.FromEnv(ctx)
+		if err != nil {
+			slog.Error("authentication setup", "err", err)
+			os.Exit(1)
+		}
 		registry := action.NewFunctionRegistry()
 		functions.Register(registry)
 		h := &action.Handler{
@@ -100,7 +109,7 @@ func main() {
 				SyncWait: envDuration("ONTO_ACTION_SYNC_WAIT", 10*time.Second)},
 			Committer: committer,
 			Ontology:  ontology,
-			Identity:  action.HeaderIdentity, // TODO: replace with OIDC JWT verification (Spec §8.1)
+			Identity:  action.IdentityFrom(authn),
 			MaxBatch:  100,
 		}
 		srv := &http.Server{Addr: addr, Handler: h.Routes(), ReadHeaderTimeout: 10 * time.Second}

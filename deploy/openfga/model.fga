@@ -1,0 +1,32 @@
+# Human-readable copy of model.json (OpenFGA DSL). model.json is what `ontoctl fga init` uploads;
+# keep both in sync (`fga model transform --file model.fga` converts DSL to JSON).
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user, group#member]
+
+# A maintenance base. Managers can ground aircraft and assign work; engineers can view.
+type base
+  relations
+    define manager: [user, group#member]
+    define engineer: [user, group#member] or manager
+
+# Tuple base:<iata> -> base is derived from Aircraft.baseAirport by fga-sync.
+type aircraft
+  relations
+    define base: [base]
+    define viewer: engineer from base
+    define can_ground: manager from base
+
+# Tuples derived from WorkOrder.tailNumber (aircraft) and WorkOrder.technicianId (assignee).
+type work_order
+  relations
+    define aircraft: [aircraft]
+    define assignee: [user]
+    define viewer: assignee or viewer from aircraft
+    define can_assign: can_ground from aircraft
+    define can_update: assignee or can_assign

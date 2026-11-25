@@ -1,0 +1,206 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "user"
+    },
+    {
+      "type": "group",
+      "relations": {
+        "member": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "type": "group",
+                "relation": "member"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "base",
+      "relations": {
+        "manager": {
+          "this": {}
+        },
+        "engineer": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "manager"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "manager": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "type": "group",
+                "relation": "member"
+              }
+            ]
+          },
+          "engineer": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "type": "group",
+                "relation": "member"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "aircraft",
+      "relations": {
+        "base": {
+          "this": {}
+        },
+        "viewer": {
+          "tupleToUserset": {
+            "tupleset": {
+              "object": "",
+              "relation": "base"
+            },
+            "computedUserset": {
+              "object": "",
+              "relation": "engineer"
+            }
+          }
+        },
+        "can_ground": {
+          "tupleToUserset": {
+            "tupleset": {
+              "object": "",
+              "relation": "base"
+            },
+            "computedUserset": {
+              "object": "",
+              "relation": "manager"
+            }
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "base": {
+            "directly_related_user_types": [
+              {
+                "type": "base"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "work_order",
+      "relations": {
+        "aircraft": {
+          "this": {}
+        },
+        "assignee": {
+          "this": {}
+        },
+        "viewer": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "assignee"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "object": "",
+                    "relation": "aircraft"
+                  },
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "viewer"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "can_assign": {
+          "tupleToUserset": {
+            "tupleset": {
+              "object": "",
+              "relation": "aircraft"
+            },
+            "computedUserset": {
+              "object": "",
+              "relation": "can_ground"
+            }
+          }
+        },
+        "can_update": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "assignee"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_assign"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "aircraft": {
+            "directly_related_user_types": [
+              {
+                "type": "aircraft"
+              }
+            ]
+          },
+          "assignee": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

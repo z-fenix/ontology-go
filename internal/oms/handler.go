@@ -1,12 +1,14 @@
 package oms
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/acme/ontology/internal/auth"
 	"github.com/acme/ontology/internal/platform/apperr"
 	"github.com/acme/ontology/internal/platform/httpx"
 	"github.com/acme/ontology/internal/spec"
@@ -14,22 +16,58 @@ import (
 
 // Handler exposes the OMS HTTP API (Spec §5.5).
 type Handler struct {
-	svc   *Service
-	store *Store
+	svc         *Service
+	store       *Store
+	auth        auth.Authenticator
+	ownerGroups []string
 }
 
-// NewHandler builds the OMS handler.
-func NewHandler(svc *Service, store *Store) *Handler { return &Handler{svc: svc, store: store} }
+// NewHandler builds the OMS handler. Every /api/v1 call must authenticate; publishing and
+// activating versions additionally require membership in one of ownerGroups. An empty
+// ownerGroups lets any authenticated caller publish (the caller logs a warning).
+func NewHandler(svc *Service, store *Store, a auth.Authenticator, ownerGroups []string) *Handler {
+	return &Handler{svc: svc, store: store, auth: a, ownerGroups: ownerGroups}
+}
+
+type principalKey struct{}
+
+func principalFrom(r *http.Request) auth.Principal {
+	p, _ := r.Context().Value(principalKey{}).(auth.Principal)
+	return p
+}
+
+func (h *Handler) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, err := h.auth.Authenticate(r)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
+	})
+}
+
+func (h *Handler) requireOwner(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if len(h.ownerGroups) > 0 && !auth.HasAnyGroup(principalFrom(r), h.ownerGroups) {
+			httpx.WriteError(w, r, apperr.New(http.StatusForbidden, "PERMISSION_DENIED",
+				"publishing or activating versions requires membership in one of %v", h.ownerGroups))
+			return
+		}
+		next(w, r)
+	}
+}
 
 // Routes mounts the OMS endpoints under /api/v1.
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r.Route("/api/v1/ontologies/{ont}", func(r chi.Router) {
-		r.Post("/versions", h.publish)
+		r.Use(h.authenticate)
+		r.Post("/versions", h.requireOwner(h.publish))
 		r.Get("/versions", h.listVersions)
 		r.Get("/versions/{v}", h.getVersion)
-		r.Post("/versions/{v}/activate", h.activate)
+		r.Post("/versions/{v}/activate", h.requireOwner(h.activate))
 		r.Get("/compiled", h.getCompiled)
 		r.Get("/objectTypes", h.listObjectTypes)
 		r.Get("/objectTypes/{apiName}", h.getObjectType)
@@ -39,13 +77,6 @@ func (h *Handler) Routes() http.Handler {
 	return r
 }
 
-func actor(r *http.Request) string {
-	if a := r.Header.Get("X-Actor"); a != "" {
-		return a
-	}
-	return "unknown"
-}
-
 func (h *Handler) publish(w http.ResponseWriter, r *http.Request) {
 	var in PublishInput
 	if err := httpx.DecodeJSON(r, &in); err != nil {
@@ -53,7 +84,7 @@ func (h *Handler) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Ontology = chi.URLParam(r, "ont")
-	in.Actor = actor(r)
+	in.Actor = principalFrom(r).ID
 	res, err := h.svc.Publish(r.Context(), in)
 	if err != nil {
 		httpx.WriteError(w, r, err)

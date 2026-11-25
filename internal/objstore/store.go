@@ -329,6 +329,9 @@ func resolveLink(ont *spec.CompiledOntology, objType, nav string) (*resolvedLink
 	return nil, fmt.Errorf("%w: link %q on %s", ErrUnknownType, nav, objType)
 }
 
+// FKHolderIsFrom reports whether the From-side object of a foreign-key link stores the key.
+func FKHolderIsFrom(lt *spec.LinkType) bool { return fkHolderIsFrom(lt) }
+
 // fkHolderIsFrom reports whether the From-side object stores the foreign key.
 func fkHolderIsFrom(lt *spec.LinkType) bool {
 	if lt.From.ObjectType != lt.To.ObjectType {
@@ -577,8 +580,9 @@ func applyModify(ctx context.Context, tx DB, m *tableMeta, ref ObjectRef, change
 }
 
 func applyDelete(ctx context.Context, tx DB, m *tableMeta, ref ObjectRef, expected int64) (int64, error) {
-	q := fmt.Sprintf(`UPDATE %s SET "_deleted" = true, "_version" = "_version" + 1, "_edit_ts" = now(), "_updated_at" = now() WHERE %s RETURNING "_version"`,
-		m.ident, lockCond)
+	q := fmt.Sprintf(`UPDATE %s SET "_deleted" = true, "_version" = "_version" + 1, "_edit_ts" = now(), "_updated_at" = now(),
+  "_edited_props" = ARRAY(SELECT DISTINCT p FROM unnest("_edited_props" || ARRAY['%s']) AS p ORDER BY p)
+WHERE %s RETURNING "_version"`, m.ident, UserDeletedMarker, lockCond)
 	var ver int64
 	err := tx.QueryRow(ctx, q, ref.PK, expected).Scan(&ver)
 	if errors.Is(err, pgx.ErrNoRows) {

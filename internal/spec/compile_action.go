@@ -125,6 +125,11 @@ func (c *compiler) compileActionType(l located[rawActionType]) {
 		}
 	}
 
+	// AT011: link traversal in expressions and templates must follow existing single-valued links.
+	if _, err := c.out.ActionLinkPaths(at); err != nil {
+		c.errf("AT011", posOf(f, n), p, "invalid link traversal: %v", err)
+	}
+
 	// AT009: permission.on references an objectRef parameter whose object type has authz.
 	if at.Permission != nil {
 		ref := paramRef(at.Permission.On)
