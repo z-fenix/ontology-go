@@ -500,3 +500,20 @@ await client.actions.assignWorkOrder.apply({ workOrder: "WO-1", technician: "T-1
 - 只支持 TypeScript；Python/Java SDK 还没做。
 - 筛选条件里 `link.where` 的字段名不做类型检查（关联类型在运行时才确定），由服务端校验。
 - 生成的客户端按模型生成时的类型工作；模型发布新版本后要重新生成，服务端会拒绝不兼容的调用，但不会自动提示 SDK 过期。
+
+## 写回路径端到端测试（E07 / E09 / E10 / E11）
+
+`internal/e2e/writeback_test.go` 用真实组件跑完整的写回流程：真实的 Action 引擎和 PostgreSQL 提交器、真实的 Temporal 服务和 worker、真实的 webhook 执行器，外部维修系统用本地 HTTP 服务模拟。
+
+| 用例 | 场景 | 断言 |
+|---|---|---|
+| E07 | 写回成功 | 工单变为 IN_PROGRESS 并指派 T-1；MRO 收到一次 `/assign`，body 和 `Idempotency-Key` 正确；通知副作用执行且 `side_effect_run` 为 SUCCEEDED |
+| E11 | 同一幂等键提交两次 | 返回同一个 actionRid，MRO 只被调用一次 |
+| E09 | MRO 返回 500 | 按 `retry.max` 重试 3 次后返回 `WRITEBACK_FAILED`；工单版本和属性都不变；执行记录 FAILED；不发通知 |
+| E10 | 写回期间工单被并发修改 | 提交时版本冲突，调用 `/unassign` 补偿；返回 `STALE_OBJECT`；执行记录 COMPENSATED；工单只保留并发修改的那次变更；不发通知 |
+
+Temporal 的来源：
+- 设置了 `ONTO_TEST_TEMPORAL`（如 `localhost:7233`）就连这个服务；`make test-integration` 默认用 `make dev-up` 起的 Temporal。
+- 没设置时由 Temporal SDK 的 `testsuite.StartDevServer` 自动启动开发服务器，首次会下载 Temporal CLI（CI 里缓存下载结果）；也可以用 `TEMPORAL_CLI_PATH` 指定已有的 CLI。
+
+示例模型里写回 webhook 的地址是 `https://mro.internal`，测试会把它改成本地模拟服务的地址并关闭认证，不影响模型文件本身。

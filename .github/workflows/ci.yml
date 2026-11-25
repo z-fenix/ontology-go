@@ -118,6 +118,13 @@ jobs:
             psql "$ONTO_TEST_DSN" -v ON_ERROR_STOP=1 -f "$f"
           done
 
+      # internal/e2e starts a Temporal dev server through the SDK; cache the CLI it downloads.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/temporal-cli
+          key: temporal-cli-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
       # -p 1: packages share one database and reset schemas, so they must not run concurrently.
       - name: Integration tests
-        run: go test -tags integration -count=1 -p 1 ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/...
+        timeout-minutes: 15
+        run: go test -tags integration -count=1 -p 1 -timeout 10m ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/... ./internal/e2e/...

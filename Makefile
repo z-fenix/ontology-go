@@ -22,7 +22,7 @@ test:
 # concurrently. Without it, parallel CREATE TABLE on the same names races and fails with
 # "duplicate key value violates unique constraint pg_type_typname_nsp_index". CI passes -p 1 too.
 test-integration:
-	ONTO_TEST_DSN='$(TEST_DSN)' $(GO) test -tags integration -count=1 -p 1 ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/...
+	ONTO_TEST_DSN='$(TEST_DSN)' ONTO_TEST_TEMPORAL=$${ONTO_TEST_TEMPORAL-localhost:7233} $(GO) test -tags integration -count=1 -p 1 ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/... ./internal/e2e/...
 
 run-oms: build
 	ONTO_DB_DSN='$(TEST_DSN)' ONTO_AUTH_DEV_HEADERS=true ./bin/oms
