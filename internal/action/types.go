@@ -119,7 +119,7 @@ type CommitInput struct {
 	Edits          []objstore.Edit
 	Before         map[objstore.ObjectRef]map[string]any
 	Effects        []PlannedEffect // rendered side effects; recorded as PENDING side_effect_run rows
-	Result         *ApplyResult      // committer fills ConsistencyToken and stores it
+	Result         *ApplyResult    // committer fills ConsistencyToken and stores it
 }
 
 // PriorRun is an earlier run found by idempotency key.

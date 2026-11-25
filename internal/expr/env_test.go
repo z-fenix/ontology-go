@@ -35,9 +35,9 @@ func TestCompileBool(t *testing.T) {
 		}
 	}
 	bad := []string{
-		`workOrder.status =`,        // syntax error
-		`workOrder.priority + 1`,     // not bool
-		`nope.field == 1`,            // unknown variable
+		`workOrder.status =`,     // syntax error
+		`workOrder.priority + 1`, // not bool
+		`nope.field == 1`,        // unknown variable
 	}
 	for _, ex := range bad {
 		if err := env.CompileBool(ex); err == nil {

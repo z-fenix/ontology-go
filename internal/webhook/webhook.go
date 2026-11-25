@@ -22,14 +22,14 @@ import (
 
 // Request is a fully rendered webhook call (templates already evaluated by the action engine).
 type Request struct {
-	Name      string             `json:"name"`
-	Method    string             `json:"method"`
-	URL       string             `json:"url"`
-	Headers   map[string]string  `json:"headers,omitempty"`
-	Body      map[string]any     `json:"body,omitempty"`
-	TimeoutMs int                `json:"timeoutMs"`
-	Retry     spec.WebhookRetry  `json:"retry"`
-	Auth      spec.WebhookAuth   `json:"auth"`
+	Name      string            `json:"name"`
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      map[string]any    `json:"body,omitempty"`
+	TimeoutMs int               `json:"timeoutMs"`
+	Retry     spec.WebhookRetry `json:"retry"`
+	Auth      spec.WebhookAuth  `json:"auth"`
 }
 
 // Response is what the remote system returned (body truncated for audit storage).

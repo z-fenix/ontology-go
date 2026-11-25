@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	_ "github.com/acme/ontology/internal/expr" // registers CEL validators with spec via init
 	"github.com/acme/ontology/internal/objstore"
 	"github.com/acme/ontology/internal/spec"
-	_ "github.com/acme/ontology/internal/expr" // registers CEL validators with spec via init
 )
 
 var version = "dev"

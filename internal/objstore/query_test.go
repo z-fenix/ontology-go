@@ -97,16 +97,16 @@ func TestCompileOperators(t *testing.T) {
 
 func TestCompileRejects(t *testing.T) {
 	cases := map[string]*Where{
-		"two operators":     {Eq: &Cmp{Field: "status", Value: "OPEN"}, Gt: &Cmp{Field: "priority", Value: 1}},
-		"no operator":       {},
-		"unknown field":     {Eq: &Cmp{Field: "nope", Value: 1}},
-		"vector field":      {Eq: &Cmp{Field: "descriptionEmbedding", Value: 1}},
-		"bad value type":    {Eq: &Cmp{Field: "priority", Value: "high"}},
+		"two operators":       {Eq: &Cmp{Field: "status", Value: "OPEN"}, Gt: &Cmp{Field: "priority", Value: 1}},
+		"no operator":         {},
+		"unknown field":       {Eq: &Cmp{Field: "nope", Value: 1}},
+		"vector field":        {Eq: &Cmp{Field: "descriptionEmbedding", Value: 1}},
+		"bad value type":      {Eq: &Cmp{Field: "priority", Value: "high"}},
 		"range without value": {Gt: &Cmp{Field: "summary", Value: nil}},
-		"unknown link":      {Link: &LinkCmp{Path: "engines"}},
-		"null in list":      {In: &InCmp{Field: "status", Values: []any{nil}}},
-		"contains on int":   {Contains: &Cmp{Field: "priority", Value: 1}},
-		"startsWith on int": {StartsWith: &Cmp{Field: "priority", Value: "1"}},
+		"unknown link":        {Link: &LinkCmp{Path: "engines"}},
+		"null in list":        {In: &InCmp{Field: "status", Values: []any{nil}}},
+		"contains on int":     {Contains: &Cmp{Field: "priority", Value: 1}},
+		"startsWith on int":   {StartsWith: &Cmp{Field: "priority", Value: "1"}},
 	}
 	for name, w := range cases {
 		t.Run(name, func(t *testing.T) {

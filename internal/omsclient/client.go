@@ -28,11 +28,11 @@ type Cache struct {
 	loader   Loader
 	maxItems int
 
-	mu       sync.RWMutex
-	byVer    map[int64]*list.Element
-	lru      *list.List
-	active   int64
-	notify   chan int64
+	mu     sync.RWMutex
+	byVer  map[int64]*list.Element
+	lru    *list.List
+	active int64
+	notify chan int64
 }
 
 type entry struct {

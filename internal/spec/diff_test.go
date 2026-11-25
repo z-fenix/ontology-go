@@ -4,7 +4,7 @@ import "testing"
 
 func base() *CompiledOntology {
 	return &CompiledOntology{
-		APIName: "mro",
+		APIName:    "mro",
 		ValueTypes: map[string]*ValueType{},
 		ObjectTypes: map[string]*ObjectType{
 			"WorkOrder": {

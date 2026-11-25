@@ -47,12 +47,12 @@ type EffectInput struct {
 
 // PlanSummary is what the workflow needs from the plan (kept small: it lands in history).
 type PlanSummary struct {
-	Writeback        string   `json:"writeback"`
-	HasCompensate    bool     `json:"hasCompensate"`
-	RetryMax         int      `json:"retryMax"`
-	TimeoutMs        int      `json:"timeoutMs"`
-	SideEffectCount  int      `json:"sideEffectCount"`
-	SideEffectNames  []string `json:"sideEffectNames"`
+	Writeback       string   `json:"writeback"`
+	HasCompensate   bool     `json:"hasCompensate"`
+	RetryMax        int      `json:"retryMax"`
+	TimeoutMs       int      `json:"timeoutMs"`
+	SideEffectCount int      `json:"sideEffectCount"`
+	SideEffectNames []string `json:"sideEffectNames"`
 }
 
 // WorkflowID returns the workflow ID for a write-back run.

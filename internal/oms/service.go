@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 
-
 	"github.com/acme/ontology/internal/objstore"
 	"github.com/acme/ontology/internal/platform/apperr"
 	"github.com/acme/ontology/internal/spec"
@@ -21,12 +20,12 @@ func NewService(store *Store) *Service { return &Service{store: store} }
 
 // PublishInput is a publish request: the source files and the committing identity.
 type PublishInput struct {
-	Ontology  string              `json:"ontology"`
-	GitCommit string              `json:"gitCommit"`
-	Files     []SourceFile        `json:"files"`
-	DryRun    bool                `json:"dryRun"`
-	Actor     string              `json:"-"`
-	AllowTighten bool             `json:"allowConstraintTightening"`
+	Ontology     string       `json:"ontology"`
+	GitCommit    string       `json:"gitCommit"`
+	Files        []SourceFile `json:"files"`
+	DryRun       bool         `json:"dryRun"`
+	Actor        string       `json:"-"`
+	AllowTighten bool         `json:"allowConstraintTightening"`
 }
 
 // SourceFile is one YAML source as sent by ontoctl.
@@ -37,11 +36,11 @@ type SourceFile struct {
 
 // PublishResult reports the outcome.
 type PublishResult struct {
-	Version     int64                `json:"version"`
-	Status      string               `json:"status"`
-	ChangeSet   spec.ChangeSet       `json:"changeset"`
-	Diagnostics spec.Diagnostics     `json:"diagnostics,omitempty"`
-	Reused      bool                 `json:"reused"`
+	Version     int64            `json:"version"`
+	Status      string           `json:"status"`
+	ChangeSet   spec.ChangeSet   `json:"changeset"`
+	Diagnostics spec.Diagnostics `json:"diagnostics,omitempty"`
+	Reused      bool             `json:"reused"`
 }
 
 // Publish runs the full state machine. The server re-compiles and re-validates — it never trusts
@@ -237,4 +236,3 @@ func derefOr(p *int64, d int64) int64 {
 	}
 	return *p
 }
-

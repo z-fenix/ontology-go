@@ -33,7 +33,7 @@ func loadOntology(t *testing.T) *spec.CompiledOntology {
 
 type fakeOnt struct{ o *spec.CompiledOntology }
 
-func (f fakeOnt) Active(context.Context) (*spec.CompiledOntology, error) { return f.o, nil }
+func (f fakeOnt) Active(context.Context) (*spec.CompiledOntology, error)     { return f.o, nil }
 func (f fakeOnt) Get(context.Context, int64) (*spec.CompiledOntology, error) { return f.o, nil }
 
 // fakeStore keeps objects in PK order; Search ignores the filter (the store's SQL is tested in objstore).

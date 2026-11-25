@@ -43,7 +43,9 @@ func (f fakeOnt) Get(_ context.Context, v int64) (*spec.CompiledOntology, error)
 	return f.o, nil
 }
 
-type fakeObjects struct{ objs map[objstore.ObjectRef]*objstore.Object }
+type fakeObjects struct {
+	objs map[objstore.ObjectRef]*objstore.Object
+}
 
 func (f *fakeObjects) GetMany(_ context.Context, _ *spec.CompiledOntology, refs []objstore.ObjectRef) (map[objstore.ObjectRef]*objstore.Object, error) {
 	out := map[objstore.ObjectRef]*objstore.Object{}
@@ -91,8 +93,8 @@ type fakeCommitter struct {
 	commits  []*CommitInput
 	reserved []*CommitInput
 	marks    []string
-	byKey   map[string]*PriorRun
-	err     error
+	byKey    map[string]*PriorRun
+	err      error
 }
 
 func (f *fakeCommitter) FindByIdempotency(_ context.Context, actor, at, key string) (*PriorRun, error) {
