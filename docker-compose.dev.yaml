@@ -3,7 +3,7 @@ name: ontology-dev
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:19
     environment:
       POSTGRES_USER: onto
       POSTGRES_PASSWORD: onto
@@ -11,7 +11,11 @@ services:
     ports: ["5432:5432"]
     volumes:
       - ./deploy/dev/init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
-      - pgdata:/var/lib/postgresql/data
+      # postgres 18+ stores data in a major-version-specific subdirectory (PGDATA is
+      # /var/lib/postgresql/19/docker), so the volume must mount at the parent. Mounting
+      # at /var/lib/postgresql/data leaves the volume unused and the entrypoint refuses
+      # to start. See https://github.com/docker-library/postgres/pull/1259
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U onto -d ontology"]
       interval: 3s
@@ -27,7 +31,7 @@ services:
     restart: on-failure
 
   openfga-migrate:
-    image: openfga/openfga:v1.8.1
+    image: openfga/openfga
     depends_on:
       postgres: { condition: service_healthy }
     command: migrate
@@ -37,7 +41,7 @@ services:
     restart: on-failure
 
   openfga:
-    image: openfga/openfga:v1.8.1
+    image: openfga/openfga
     depends_on:
       openfga-migrate: { condition: service_completed_successfully }
     command: run
@@ -48,7 +52,7 @@ services:
     ports: ["8090:8080"]
 
   temporal:
-    image: temporalio/auto-setup:1.25
+    image: temporalio/auto-setup
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -60,7 +64,7 @@ services:
     ports: ["7233:7233"]
 
   temporal-ui:
-    image: temporalio/ui:2.31.2
+    image: temporalio/ui
     depends_on: [temporal]
     environment:
       TEMPORAL_ADDRESS: temporal:7233

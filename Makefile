@@ -18,8 +18,11 @@ test:
 	$(GO) test ./... -cover
 
 # Needs `make dev-up`. WARNING: drops and recreates schema "obj" in TEST_DSN.
+# -p 1: the packages share one database and each resets its schemas, so they must not run
+# concurrently. Without it, parallel CREATE TABLE on the same names races and fails with
+# "duplicate key value violates unique constraint pg_type_typname_nsp_index". CI passes -p 1 too.
 test-integration:
-	ONTO_TEST_DSN='$(TEST_DSN)' $(GO) test -tags integration -count=1 ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/...
+	ONTO_TEST_DSN='$(TEST_DSN)' $(GO) test -tags integration -count=1 -p 1 ./internal/objstore/... ./internal/oms/... ./internal/action/... ./internal/indexer/... ./internal/authz/...
 
 run-oms: build
 	ONTO_DB_DSN='$(TEST_DSN)' ONTO_AUTH_DEV_HEADERS=true ./bin/oms

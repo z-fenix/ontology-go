@@ -1,5 +1,7 @@
 bin/
 coverage.out
 *.log
+# Local credentials and generated dev state — never commit.
+.env
 .env.fga
 examples/sdk/mro.ts
