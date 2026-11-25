@@ -1,0 +1,28 @@
+actionType:
+  apiName: assignWorkOrder
+  displayName: 指派工单
+  description: 将工单指派给一名技师，并把状态置为 IN_PROGRESS。
+  parameters:
+    workOrder:  { type: objectRef<WorkOrder>, required: true }
+    technician: { type: objectRef<Technician>, required: true }
+    note:       { type: string }
+  submissionCriteria:
+    - expr: 'workOrder.status == "OPEN"'
+      message: 只有 OPEN 状态的工单可以指派
+    - expr: 'note == "" || size(note) <= 500'
+      message: 备注过长
+  rules:
+    - modifyObject:
+        object: "{{workOrder}}"
+        set:
+          technicianId: "{{technician.technicianId}}"
+          status: IN_PROGRESS
+  sideEffects:
+    - { webhook: mro_assign_writeback, mode: WRITEBACK }
+    - { notifyTo: "{{technician.email}}", template: wo_assigned }
+  permission:
+    relation: can_assign
+    on: "{{workOrder}}"
+  ai:
+    exposeToAgents: true
+    requireHumanConfirmation: true

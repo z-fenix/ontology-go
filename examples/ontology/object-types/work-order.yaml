@@ -1,0 +1,26 @@
+objectType:
+  apiName: WorkOrder
+  displayName: 维修工单
+  primaryKey: workOrderId
+  titleProperty: summary
+  properties:
+    workOrderId:          { type: string, required: true }
+    summary:              { type: string, required: true }
+    description:          { type: string }
+    descriptionEmbedding: { type: vector(1024), derivedFrom: description }
+    status:               { type: string, valueType: WorkOrderStatus, required: true }
+    priority:             { type: integer, constraints: { min: 1, max: 5 } }
+    tailNumber:           { type: string, required: true }
+    technicianId:         { type: string }
+    dueAt:                { type: timestamp }
+    estimatedCost:        { type: "decimal(14,2)", sensitivity: CONFIDENTIAL }
+  datasource:
+    connector: mro_db
+    table: public.work_orders
+    conflictStrategy: MOST_RECENT_VALUE
+    timestampColumn: updated_at
+  authz:
+    fgaType: work_order
+    tuples:
+      - { relation: aircraft, target: "aircraft:{{tailNumber}}" }
+      - { relation: assignee, target: "user:{{technicianId}}" }

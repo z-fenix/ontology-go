@@ -1,0 +1,13 @@
+linkTypes:
+  - apiName: aircraftWorkOrders
+    from: { objectType: Aircraft, apiName: workOrders, cardinality: MANY }
+    to:   { objectType: WorkOrder, apiName: aircraft, cardinality: ONE }
+    foreignKey: { on: WorkOrder, property: tailNumber }
+  - apiName: workOrderTechnician
+    from: { objectType: WorkOrder, apiName: technician, cardinality: ONE }
+    to:   { objectType: Technician, apiName: workOrders, cardinality: MANY }
+    foreignKey: { on: WorkOrder, property: technicianId }
+  - apiName: aircraftParts
+    from: { objectType: Aircraft, apiName: parts, cardinality: MANY }
+    to:   { objectType: Part, apiName: installedOn, cardinality: MANY }
+    joinTable: { connector: mro_db, table: public.aircraft_parts, fromColumn: tail_no, toColumn: part_sn }

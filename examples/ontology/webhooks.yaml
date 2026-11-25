@@ -1,0 +1,13 @@
+webhooks:
+  - name: mro_assign_writeback
+    method: POST
+    url: "https://mro.internal/api/work-orders/{{workOrder.workOrderId}}/assign"
+    auth: { type: oauth2_client_credentials, secretRef: "vault://mro/client" }
+    body:
+      technician: "{{technician.technicianId}}"
+      note: "{{note}}"
+    timeoutMs: 5000
+    retry: { max: 3, backoff: exponential }
+    compensate:
+      method: POST
+      url: "https://mro.internal/api/work-orders/{{workOrder.workOrderId}}/unassign"

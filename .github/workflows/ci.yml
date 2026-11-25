@@ -1,0 +1,111 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.23"
+
+jobs:
+  unit:
+    name: build + vet + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod
+
+      # go.sum is generated on the first run if it has not been committed yet.
+      - name: Resolve modules
+        run: |
+          if [ ! -f go.sum ]; then
+            echo "::warning::go.sum is missing; running go mod tidy (commit go.sum to make builds reproducible)"
+            go mod tidy
+          fi
+          go mod download
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "::error::run 'make fmt' and commit; unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: Unit tests
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Validate example ontology
+        run: |
+          go build -o bin/ontoctl ./cmd/ontoctl
+          ./bin/ontoctl validate examples/ontology --strict
+          ./bin/ontoctl ddl examples/ontology > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: ignore
+
+  integration:
+    name: integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: unit
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: onto
+          POSTGRES_PASSWORD: onto
+          POSTGRES_DB: ontology
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U onto -d ontology"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      ONTO_TEST_DSN: postgres://onto:onto@localhost:5432/ontology?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod
+
+      - name: Resolve modules
+        run: |
+          if [ ! -f go.sum ]; then go mod tidy; fi
+          go mod download
+
+      - name: Apply migrations
+        run: |
+          for f in $(ls migrations/*.up.sql | sort); do
+            echo "applying $f"
+            psql "$ONTO_TEST_DSN" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      # -p 1: packages share one database and reset schemas, so they must not run concurrently.
+      - name: Integration tests
+        run: go test -tags integration -count=1 -p 1 ./internal/objstore/... ./internal/oms/... ./internal/action/...

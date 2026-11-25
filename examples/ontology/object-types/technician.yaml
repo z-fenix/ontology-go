@@ -1,0 +1,14 @@
+objectType:
+  apiName: Technician
+  displayName: 技师
+  primaryKey: technicianId
+  titleProperty: name
+  properties:
+    technicianId:   { type: string, required: true }
+    name:           { type: string, required: true }
+    email:          { type: string }
+    certifications: { type: "array<string>" }
+    baseAirport:    { type: string }
+  datasource:
+    connector: mro_db
+    table: public.technicians

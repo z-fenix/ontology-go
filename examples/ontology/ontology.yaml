@@ -1,0 +1,5 @@
+ontology:
+  apiName: mro
+  displayName: 航空维修
+  connectors:
+    mro_db: { kind: postgres, dsnRef: "vault://mro/db" }

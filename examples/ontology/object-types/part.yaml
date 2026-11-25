@@ -1,0 +1,15 @@
+objectType:
+  apiName: Part
+  displayName: 部件
+  primaryKey: partSerialNumber
+  titleProperty: partNumber
+  properties:
+    partSerialNumber:   { type: string, required: true }
+    partNumber:         { type: string, required: true }
+    description:        { type: string }
+    remainingLifeHours: { type: double }
+  datasource:
+    connector: mro_db
+    table: public.parts
+    columnMapping:
+      partSerialNumber: part_sn

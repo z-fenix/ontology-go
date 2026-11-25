@@ -1,0 +1,7 @@
+valueTypes:
+  - apiName: TailNumber
+    baseType: string
+    constraints: { regex: "^[A-Z]-[A-Z0-9]{4}$" }
+  - apiName: WorkOrderStatus
+    baseType: string
+    constraints: { enum: [OPEN, IN_PROGRESS, DONE, CANCELLED] }

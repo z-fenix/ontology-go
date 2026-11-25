@@ -1,0 +1,24 @@
+objectType:
+  apiName: Aircraft
+  displayName: 飞机
+  primaryKey: tailNumber
+  titleProperty: tailNumber
+  properties:
+    tailNumber:  { type: string, valueType: TailNumber, required: true }
+    model:       { type: string }
+    status:      { type: string, constraints: { enum: [ACTIVE, GROUNDED] } }
+    flightHours: { type: double }
+    baseAirport: { type: string }
+  datasource:
+    connector: mro_db
+    table: public.aircraft
+    columnMapping:
+      tailNumber: tail_no
+      model: model_code
+      flightHours: total_fh
+      baseAirport: base_iata
+    conflictStrategy: APPLY_USER_EDITS
+  authz:
+    fgaType: aircraft
+    tuples:
+      - { relation: base, target: "base:{{baseAirport}}" }

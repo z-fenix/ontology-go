@@ -1,0 +1,11 @@
+actionType:
+  apiName: groundAircraft
+  displayName: 停场飞机
+  description: 将飞机状态置为 GROUNDED，并新建一张检查工单。
+  parameters:
+    aircraft: { type: objectRef<Aircraft>, required: true }
+    reason:   { type: string, required: true }
+  function: { runtime: go, ref: groundAircraft }
+  permission:
+    relation: can_ground
+    on: "{{aircraft}}"
