@@ -12,7 +12,7 @@ type SecretProvider interface {
 	Secret(ctx context.Context, ref string) (string, error)
 }
 
-// EnvSecrets resolves env://NAME from the process environment. vault:// is not supported yet.
+// EnvSecrets resolves env://NAME from the process environment (see Secrets for vault://).
 type EnvSecrets struct{}
 
 // Secret implements SecretProvider.
@@ -20,7 +20,7 @@ func (EnvSecrets) Secret(_ context.Context, ref string) (string, error) {
 	name, ok := strings.CutPrefix(ref, "env://")
 	if !ok {
 		if strings.HasPrefix(ref, "vault://") {
-			return "", fmt.Errorf("vault secrets are not configured in this build (%s)", ref)
+			return "", fmt.Errorf("vault secrets need a Vault provider (%s)", ref)
 		}
 		return "", fmt.Errorf("unsupported secret reference %q", ref)
 	}

@@ -74,6 +74,12 @@ jobs:
           ./bin/ontoctl sdk generate examples/ontology --out examples/sdk/mro.ts --header "commit ${GITHUB_SHA}"
           npx --yes -p typescript@5.6 tsc -p examples/sdk/tsconfig.json
 
+      # Out-of-process function runtimes: no dependencies beyond Node and the Python standard library.
+      - name: Function runtimes
+        run: |
+          python3 runtimes/python/test_runtime.py
+          node --experimental-strip-types --test runtimes/typescript/runtime.test.ts
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

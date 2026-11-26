@@ -348,8 +348,9 @@ WHERE action_rid=$1 AND status <> 'COMMITTED'`, actionRID, status, errJSON)
 func (c *PGCommitter) GetRun(ctx context.Context, actionRID string) (*RunRecord, error) {
 	var rr RunRecord
 	var result, errJSON []byte
-	err := c.Pool.QueryRow(ctx, `SELECT action_rid, action_type, actor_id, status, result, error FROM edits.action_run
-WHERE action_rid = $1`, actionRID).Scan(&rr.ActionRID, &rr.ActionType, &rr.ActorID, &rr.Status, &result, &errJSON)
+	err := c.Pool.QueryRow(ctx, `SELECT action_rid, action_type, actor_id, COALESCE(on_behalf_of, ''), status, result, error
+FROM edits.action_run WHERE action_rid = $1`, actionRID).Scan(&rr.ActionRID, &rr.ActionType, &rr.ActorID, &rr.OnBehalfOf,
+		&rr.Status, &result, &errJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

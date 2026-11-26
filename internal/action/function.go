@@ -31,7 +31,7 @@ type FuncInput struct {
 type Func func(ctx context.Context, in FuncInput) ([]objstore.Edit, error)
 
 // FunctionRegistry maps a function ref (actionType.function.ref) to a Go implementation.
-// TypeScript/Python runtimes are a later iteration; their refs are simply not registered.
+// TypeScript and Python functions run out of process; see RemoteRuntime.
 type FunctionRegistry struct {
 	mu    sync.RWMutex
 	funcs map[string]Func

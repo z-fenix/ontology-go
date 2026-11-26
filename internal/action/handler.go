@@ -42,6 +42,12 @@ type Handler struct {
 	Ontology  string // the ontology apiName this service instance serves
 	Identity  IdentityFunc
 	MaxBatch  int
+	// Audit serves the run-listing endpoints; nil disables them (501).
+	Audit AuditStore
+	// AuditGroups may read every run; everyone else sees only their own.
+	AuditGroups []string
+	// Limiter rate-limits validate/apply per actor and action type; nil disables limiting.
+	Limiter *Limiter
 }
 
 // Routes mounts the endpoints.
@@ -52,7 +58,9 @@ func (h *Handler) Routes() http.Handler {
 		r.Post("/actions/{action}/validate", h.run(ModeValidate))
 		r.Post("/actions/{action}/apply", h.run(ModeApply))
 		r.Post("/actions/{action}/applyBatch", h.applyBatch)
+		r.Get("/actionRuns", h.listRuns)
 		r.Get("/actionRuns/{rid}", h.getRun)
+		r.Get("/actionRuns/{rid}/edits", h.getRunEdits)
 	})
 	return r
 }
@@ -93,6 +101,10 @@ func (h *Handler) run(mode Mode) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, ok := h.prepare(w, r)
 		if !ok {
+			return
+		}
+		if wait := h.Limiter.Allow(actor, chi.URLParam(r, "action"), 1); wait > 0 {
+			httpx.WriteError(w, r, RateLimited(w, wait))
 			return
 		}
 		var body applyBody
@@ -142,6 +154,10 @@ func (h *Handler) applyBatch(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.BadRequest("INVALID_BATCH", "a batch must contain 1..%d requests", max))
 		return
 	}
+	if wait := h.Limiter.Allow(actor, chi.URLParam(r, "action"), len(body.Requests)); wait > 0 {
+		httpx.WriteError(w, r, RateLimited(w, wait))
+		return
+	}
 	out := make([]batchItem, 0, len(body.Requests))
 	for i, item := range body.Requests {
 		if item.Parameters == nil {
@@ -158,7 +174,7 @@ func (h *Handler) applyBatch(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
-// getRun returns a run to its actor only (owner-wide audit queries come with OIDC roles).
+// getRun returns a run to its actor, the user an agent acted for, or an auditor.
 func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 	actor, ok := h.prepare(w, r)
 	if !ok {
@@ -169,7 +185,7 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if rr == nil || rr.ActorID != actor.ID {
+	if rr == nil || !h.canSeeRun(actor, rr.ActorID, rr.OnBehalfOf) {
 		httpx.WriteError(w, r, apperr.New(http.StatusNotFound, "ACTION_RUN_NOT_FOUND", "action run not found"))
 		return
 	}

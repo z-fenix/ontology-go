@@ -83,7 +83,7 @@ func main() {
 		w.RegisterActivity(&workflow.Activities{
 			Store:      committer,
 			Ontologies: cache,
-			Webhooks:   webhook.NewExecutor(webhook.EnvSecrets{}, splitList(os.Getenv("ONTO_WEBHOOK_ALLOWED_HOSTS"))),
+			Webhooks:   webhook.NewExecutor(mustSecrets(), splitList(os.Getenv("ONTO_WEBHOOK_ALLOWED_HOSTS"))),
 			Notifier:   action.LogNotifier{},
 		})
 		if err := w.Start(); err != nil {
@@ -92,6 +92,13 @@ func main() {
 		}
 		defer w.Stop()
 		slog.Info("temporal worker started", "taskQueue", workflow.TaskQueue)
+		if iv := os.Getenv("ONTO_SWEEP_INTERVAL"); iv != "off" {
+			sw := &action.Sweeper{Store: committer, Dispatcher: &workflow.Dispatcher{Client: tc},
+				Interval:  envDuration("ONTO_SWEEP_INTERVAL", time.Minute),
+				OlderThan: envDuration("ONTO_SWEEP_OLDER_THAN", 5*time.Minute)}
+			go sw.Run(ctx)
+			slog.Info("stuck-run sweeper started", "interval", sw.Interval, "olderThan", sw.OlderThan)
+		}
 	}
 
 	if runAPI {
@@ -103,16 +110,27 @@ func main() {
 		}
 		registry := action.NewFunctionRegistry()
 		functions.Register(registry)
+		runtimes, callbacks := mustRuntimes()
 		h := &action.Handler{
 			Engine: &action.Engine{Ontologies: cache, Objects: store, Authz: az, Committer: committer,
 				Functions: registry, Dispatcher: &workflow.Dispatcher{Client: tc},
-				SyncWait: envDuration("ONTO_ACTION_SYNC_WAIT", 10*time.Second)},
+				SyncWait: envDuration("ONTO_ACTION_SYNC_WAIT", 10*time.Second), Runtimes: runtimes},
 			Committer: committer,
 			Ontology:  ontology,
 			Identity:  action.IdentityFrom(authn),
 			MaxBatch:  100,
+			Audit:     committer,
+			Limiter:   mustLimiter(),
 		}
-		srv := &http.Server{Addr: addr, Handler: h.Routes(), ReadHeaderTimeout: 10 * time.Second}
+		h.AuditGroups = splitList(os.Getenv("ONTO_AUDIT_GROUPS"))
+		routes := http.NewServeMux()
+		routes.Handle("/", h.Routes())
+		if callbacks != nil {
+			// Read callbacks for TypeScript/Python functions. Each path carries a random per-invocation
+			// token; expose this prefix only on the network the runtimes use.
+			routes.Handle("/internal/function-reads/", http.StripPrefix("/internal/function-reads", callbacks.Handler()))
+		}
+		srv := &http.Server{Addr: addr, Handler: routes, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			slog.Info("action-service listening", "addr", addr, "ontology", ontology)
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -140,6 +158,71 @@ func mustAuthorizer() authz.Authorizer {
 	slog.Error("set ONTO_FGA_URL (or ONTO_AUTHZ_ALLOW_ALL=true for local dev)")
 	os.Exit(1)
 	return nil
+}
+
+// mustSecrets resolves env:// always and vault:// when VAULT_ADDR is set.
+func mustSecrets() webhook.SecretProvider {
+	v, err := webhook.VaultFromEnv()
+	if err != nil {
+		slog.Error("vault configuration", "err", err)
+		os.Exit(1)
+	}
+	if v == nil {
+		return webhook.Secrets{}
+	}
+	slog.Info("vault secrets enabled", "addr", v.Addr)
+	return webhook.Secrets{Vault: v}
+}
+
+// mustRuntimes reads ONTO_FUNCTION_RUNTIMES ("python=<url>,typescript=<url>"), ONTO_FUNCTION_CALLBACK_URL
+// (this service as the runtimes reach it), ONTO_FUNCTION_RUNTIME_TOKEN and ONTO_FUNCTION_TIMEOUT.
+func mustRuntimes() (map[string]*action.RemoteRuntime, *action.FunctionCallbacks) {
+	urls, err := action.ParseRuntimes(os.Getenv("ONTO_FUNCTION_RUNTIMES"))
+	if err != nil {
+		slog.Error("ONTO_FUNCTION_RUNTIMES", "err", err)
+		os.Exit(1)
+	}
+	if len(urls) == 0 {
+		return nil, nil
+	}
+	cb := action.NewFunctionCallbacks()
+	out := map[string]*action.RemoteRuntime{}
+	for name, u := range urls {
+		out[name] = &action.RemoteRuntime{Name: name, URL: u, CallbackURL: mustEnv("ONTO_FUNCTION_CALLBACK_URL"),
+			Token: os.Getenv("ONTO_FUNCTION_RUNTIME_TOKEN"), Timeout: envDuration("ONTO_FUNCTION_TIMEOUT", 10*time.Second),
+			Callbacks: cb}
+		slog.Info("function runtime configured", "runtime", name, "url", u)
+	}
+	return out, cb
+}
+
+// mustLimiter reads ONTO_RATE_LIMIT ("<perMinute>[/<burst>]", default unlimited),
+// ONTO_RATE_LIMIT_AGENT (same format, for AGENT callers) and ONTO_RATE_LIMIT_ACTIONS
+// ("<action>=<perMinute>[/<burst>],..."). It returns nil when no limit is set.
+func mustLimiter() *action.Limiter {
+	def, err := action.ParseRateLimit(os.Getenv("ONTO_RATE_LIMIT"))
+	if err != nil {
+		slog.Error("ONTO_RATE_LIMIT", "err", err)
+		os.Exit(1)
+	}
+	per, err := action.ParseActionRateLimits(os.Getenv("ONTO_RATE_LIMIT_ACTIONS"))
+	if err != nil {
+		slog.Error("ONTO_RATE_LIMIT_ACTIONS", "err", err)
+		os.Exit(1)
+	}
+	l := &action.Limiter{Default: def, PerAction: per}
+	if v := os.Getenv("ONTO_RATE_LIMIT_AGENT"); v != "" {
+		rl, err := action.ParseRateLimit(v)
+		if err != nil {
+			slog.Error("ONTO_RATE_LIMIT_AGENT", "err", err)
+			os.Exit(1)
+		}
+		l.Agents = &rl
+	}
+	if def.PerMinute <= 0 && len(per) == 0 && l.Agents == nil {
+		return nil
+	}
+	return l
 }
 
 func splitList(s string) []string {

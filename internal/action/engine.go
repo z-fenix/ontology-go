@@ -37,6 +37,8 @@ type Engine struct {
 	SyncWait time.Duration
 	// StaleRetries is how many times a STALE_OBJECT conflict is retried from step 4 (default 1).
 	StaleRetries int
+	// Runtimes holds out-of-process function runtimes by name (typescript, python).
+	Runtimes map[string]*RemoteRuntime
 }
 
 func newActionRID() string {
@@ -338,13 +340,19 @@ func (e *Engine) buildEdits(ctx context.Context, ont *spec.CompiledOntology, at 
 	if at.Function == nil {
 		return expandRules(ont, at, env, vars, rp, objs)
 	}
-	if at.Function.Runtime != "go" || e.Functions == nil {
+	var fn Func
+	switch rt := e.Runtimes[at.Function.Runtime]; {
+	case at.Function.Runtime == "go" && e.Functions != nil:
+		f, ok := e.Functions.Lookup(at.Function.Ref)
+		if !ok {
+			return nil, apperr.New(http.StatusNotImplemented, "FUNCTION_NOT_REGISTERED", "function %q is not registered", at.Function.Ref)
+		}
+		fn = f
+	case rt != nil:
+		fn = rt.Func(ont, at.Function.Ref)
+	default:
 		return nil, apperr.New(http.StatusNotImplemented, "FUNCTION_RUNTIME_UNAVAILABLE",
-			"function runtime %q is not available in this build", at.Function.Runtime)
-	}
-	fn, ok := e.Functions.Lookup(at.Function.Ref)
-	if !ok {
-		return nil, apperr.New(http.StatusNotImplemented, "FUNCTION_NOT_REGISTERED", "function %q is not registered", at.Function.Ref)
+			"function runtime %q is not configured", at.Function.Runtime)
 	}
 	in := FuncInput{
 		Params: rp.values, Objects: map[string]*objstore.Object{}, Lists: map[string][]*objstore.Object{},

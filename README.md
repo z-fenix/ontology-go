@@ -517,3 +517,55 @@ Temporal 的来源：
 - 没设置时由 Temporal SDK 的 `testsuite.StartDevServer` 自动启动开发服务器，首次会下载 Temporal CLI（CI 里缓存下载结果）；也可以用 `TEMPORAL_CLI_PATH` 指定已有的 CLI。
 
 示例模型里写回 webhook 的地址是 `https://mro.internal`，测试会把它改成本地模拟服务的地址并关闭认证，不影响模型文件本身。
+
+## Action Service 运维功能
+
+### 卡住执行清扫
+worker 进程里定期扫描两类卡住的执行，默认每分钟一次，只处理 5 分钟没有更新的记录：
+- **写回执行**停在 `WRITEBACK_PENDING` 或 `COMPENSATING`，比如保留执行之后、启动工作流之前进程退出了。清扫器重新派发工作流：工作流 ID 由 actionRid 派生，已在运行或已结束的工作流只会被关联上，不会重复执行。工作流已结束但结果没记下来的，补记结果。
+- **已提交执行的副作用**还是 `PENDING`，比如提交后副作用工作流没启动成功。清扫器重新启动副作用工作流，已成功的副作用不会重发。
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `ONTO_SWEEP_INTERVAL` | `1m` | 扫描间隔；设为 `off` 关闭 |
+| `ONTO_SWEEP_OLDER_THAN` | `5m` | 记录多久没更新算卡住 |
+
+多副本同时扫描是安全的，原因同上。
+
+### 审计查询
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/ontologies/{ont}/actionRuns` | 按 `actor`、`actionType`、`status`、`objectType`+`objectPk`、`since`/`until`（RFC 3339）筛选，按创建时间倒序；`pageSize` 1–200（默认 50），用 `nextPageToken` 翻页 |
+| `GET /api/v1/ontologies/{ont}/actionRuns/{rid}` | 单个执行及其副作用状态 |
+| `GET /api/v1/ontologies/{ont}/actionRuns/{rid}/edits` | 该执行的对象编辑（变更和修改前的值） |
+
+可见范围：`ONTO_AUDIT_GROUPS` 里的组成员（审计员）能看所有执行；其他人只能看自己发起的执行，以及 Agent 代表自己发起的执行。非审计员按别人的 `actor` 筛选返回 403，看别人的单个执行返回 404。
+
+### 限流
+按"调用者 × 动作类型"做令牌桶限流，作用于 validate、apply 和 applyBatch（批量请求按条数扣令牌）。超限返回 `429 RATE_LIMITED`，带 `Retry-After` 头。
+
+| 环境变量 | 格式 | 说明 |
+|---|---|---|
+| `ONTO_RATE_LIMIT` | `<每分钟>[/<突发>]`，如 `60/10` | 默认限额；不设表示不限 |
+| `ONTO_RATE_LIMIT_AGENT` | 同上 | AGENT 调用者的限额 |
+| `ONTO_RATE_LIMIT_ACTIONS` | `assignWorkOrder=30/5,groundAircraft=2` | 按动作类型覆盖，优先级最高 |
+
+限流状态在各副本内存里，N 个副本时实际上限最多是 N 倍。需要全局精确限流时，可以换成基于 Redis 等共享存储的实现。
+
+### Vault 密钥
+webhook 的 `secretRef` 现在支持 `vault://<路径>[#<字段>]`，从 Vault KV v2 读取：
+- `vault://mro/client#token` 取字段 `token`。
+- `vault://mro/client` 在只有一个 `value` 字段时取该值，否则返回整个密钥的 JSON（OAuth2 客户端凭证认证正好需要这种格式）。
+
+| 环境变量 | 说明 |
+|---|---|
+| `VAULT_ADDR` | 设了才启用 Vault |
+| `VAULT_TOKEN` | 静态令牌 |
+| `VAULT_ROLE_ID` / `VAULT_SECRET_ID` | AppRole 登录，优先于静态令牌；令牌在租期 90% 时续期，被吊销时自动重登一次 |
+| `VAULT_KV_MOUNT` | KV v2 挂载点，默认 `secret` |
+| `VAULT_NAMESPACE` | Vault Enterprise 命名空间 |
+
+读到的密钥缓存 5 分钟。`env://` 照常可用。
+
+### TypeScript / Python 函数
+函数动作现在可以用 `runtime: typescript` 或 `runtime: python`，跑在独立的运行时服务里，配置和调用协议见 [runtimes/README.md](runtimes/README.md)。两个运行时都没有第三方依赖，`make test-runtimes` 运行它们的测试。

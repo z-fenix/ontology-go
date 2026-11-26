@@ -2,7 +2,7 @@ GO ?= go
 COMPOSE ?= docker compose -f docker-compose.dev.yaml
 TEST_DSN ?= postgres://onto:onto@localhost:5432/ontology?sslmode=disable
 
-.PHONY: tidy fmt vet test test-integration build validate-example ddl-example lint dev-up dev-down dev-reset run-oms run-action publish-example run-action-fga fga-init fga-sync-once run-indexer run-query run-mcp sdk-example
+.PHONY: tidy fmt vet test test-integration build validate-example ddl-example lint dev-up dev-down dev-reset run-oms run-action publish-example run-action-fga fga-init fga-sync-once run-indexer run-query run-mcp sdk-example test-runtimes run-py-functions
 
 tidy:
 	$(GO) mod tidy
@@ -99,3 +99,10 @@ run-mcp: build
 sdk-example: build
 	./bin/ontoctl sdk generate examples/ontology --out examples/sdk/mro.ts
 	npx --yes -p typescript@5.6 tsc -p examples/sdk/tsconfig.json
+
+test-runtimes:
+	python3 runtimes/python/test_runtime.py
+	node --experimental-strip-types --test runtimes/typescript/runtime.test.ts
+
+run-py-functions:
+	python3 runtimes/python/example_functions.py

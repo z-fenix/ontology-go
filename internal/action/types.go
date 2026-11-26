@@ -144,6 +144,7 @@ type RunRecord struct {
 	ActionRID   string             `json:"actionRid"`
 	ActionType  string             `json:"actionType"`
 	ActorID     string             `json:"actor"`
+	OnBehalfOf  string             `json:"onBehalfOf,omitempty"`
 	Status      string             `json:"status"`
 	Result      *ApplyResult       `json:"result,omitempty"`
 	Error       map[string]any     `json:"error,omitempty"`
