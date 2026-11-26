@@ -167,7 +167,7 @@ func toWire(o *objstore.Object) *wireObject {
 func (c *FunctionCallbacks) lookup(w http.ResponseWriter, r *http.Request) *invocation {
 	inv := c.get(chi.URLParam(r, "token"))
 	if inv == nil {
-		httpx.WriteError(w, r, apperr.New(http.StatusNotFound, "LOCATION_NOT_FOUND", "no running function invocation"))
+		httpx.WriteError(w, r, apperr.New(http.StatusNotFound, "INVOCATION_NOT_FOUND", "no running function invocation"))
 	}
 	return inv
 }

@@ -131,8 +131,31 @@ func TestCallbackRejectsUnknownToken(t *testing.T) {
 	cb := NewFunctionCallbacks()
 	rec := httptest.NewRecorder()
 	cb.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/nope/get", strings.NewReader(`{"type":"Aircraft","pk":"B-1234"}`)))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d", rec.Code)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"INVOCATION_NOT_FOUND"`) {
+		t.Errorf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+// TestCallbackErrorCodes pins the error codes of the read callback.
+func TestCallbackErrorCodes(t *testing.T) {
+	ont := loadOntology(t)
+	cb := NewFunctionCallbacks()
+	token, err := cb.add(&invocation{ctx: context.Background(), ont: ont})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ path, body, code string }{
+		{"/" + token + "/find", `{"type":"WorkOrder","bogus":1}`, "INVALID_BODY"},
+		{"/" + token + "/find", `{"type":"WorkOrder","eq":{"priority":"high"}}`, "INVALID_FILTER"},
+		{"/" + token + "/find", `{"type":"Nope"}`, "UNKNOWN_OBJECT_TYPE"},
+		{"/" + token + "/find", `{"type":"WorkOrder","eq":{"nope":1}}`, "UNKNOWN_PROPERTY"},
+		{"/" + token + "/get", `{"type":"WorkOrder","pk":"x","extra":1}`, "INVALID_BODY"},
+	} {
+		rec := httptest.NewRecorder()
+		cb.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+tc.code+`"`) {
+			t.Errorf("%s %s: status = %d, body = %s; want 400 %s", tc.path, tc.body, rec.Code, rec.Body, tc.code)
+		}
 	}
 }
 
